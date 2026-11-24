@@ -57,7 +57,7 @@ const skin=new Image();
 const splash=$('#splash');
 const touchInput=matchMedia('(any-pointer: coarse)');
 const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)');
-const viewport={w:0,h:0,dpi:1,scale:1};
+const viewport={w:0,h:0,scale:1,pixels:null};
 const camera={x:0,y:0};
 const keys=new Set();
 const joystick={id:null,x:0,y:0};
@@ -221,22 +221,31 @@ async function copyLink(button) {
 }
 
 function resizeField() {
-  if(battle.hidden)return;
-  const {width,height}=field.getBoundingClientRect();
-  viewport.w=width;viewport.h=height;viewport.dpi=Math.min(devicePixelRatio||1,2);
-  viewport.scale=clamp(Math.max(height/world.h,Math.min(width/480,height/410)),.71,1.32);
-  field.width=Math.round(width*viewport.dpi);field.height=Math.round(height*viewport.dpi);
+  if(battle.hidden)return false;
+  const {width,height,left=0,top=0}=field.getBoundingClientRect();
+  if(!width||!height)return false;
+  const pixels=fitCanvas(field,width,height);
+  const changed=width!==viewport.w||height!==viewport.h||pixels.resized;
+  viewport.w=width;viewport.h=height;
+  viewport.pixels=pixels;
+  viewport.scale=clamp(Math.min(width,height)/416,.66,1.32);
   const padBounds=pad.getBoundingClientRect();
   const smallBounds=hud.skill.getBoundingClientRect();
   const ultimateBounds=hud.ultimate.getBoundingClientRect();
   const controlsTop=Math.min(padBounds.top,smallBounds.top,ultimateBounds.top);
   const waveHudBottom=hud.wave.parentElement?.getBoundingClientRect().bottom;
   viewport.warningEdges={
-    left:Math.max(21,(padBounds.left||0)+9),
-    right:Math.min(width-21,(ultimateBounds.right||width)-9),
-    top:Number.isFinite(waveHudBottom)?waveHudBottom+15:88,
-    bottom:Number.isFinite(controlsTop)?Math.max(height*.57,controlsTop-16):height-118,
+    left:clamp((padBounds.left-left||0)+9,Math.min(21,width*.2),width*.4),
+    right:clamp((ultimateBounds.right-left||width)-9,width*.6,width-Math.min(21,width*.2)),
+    top:clamp(Number.isFinite(waveHudBottom)?waveHudBottom-top+15:88,0,height*.48),
+    bottom:clamp(Number.isFinite(controlsTop)?controlsTop-top-16:height-118,height*.57,height),
   };
+  return changed;
+}
+
+function useFieldPixels() {
+  const {resolution,x,y}=viewport.pixels;
+  ctx.setTransform(resolution,0,0,resolution,x,y);
 }
 
 function createGround(map) {
@@ -261,11 +270,24 @@ function restoreGear(saved,hero) {
   return gear;
 }
 
+function readCheckpointState() {
+  try {
+    const current=JSON.parse(localStorage.getItem(RUN_STORAGE)||'null');
+    return current?{id:current.id,revision:current.revision??JSON.stringify(current)}:{id:null,revision:null};
+  } catch {
+    return null;
+  }
+}
+
 function startRun(saved=null) {
   closeDialog();resetInput();
   if(saved){
     selectedHero=saved.hero;selectedMap=saved.map;selectedDifficulty=saved.difficulty;
   }
+  const memoryOnly=saved?.pendingRevision!==undefined;
+  const checkpointRevision=saved
+    ?(memoryOnly?saved.pendingRevision:saved.revision??JSON.stringify(saved))
+    :(readCheckpointState()?.revision??null);
   const hero=HEROES[selectedHero],map=MAPS[selectedMap],weapon=ARMORY[hero.weapon];
   const player={
     x:world.w/2,y:world.h/2,hp:hero.hp,maxHp:hero.hp,speed:hero.speed,power:hero.power,rate:hero.id==='squid'?weapon.rate*.82:weapon.rate,
@@ -290,7 +312,7 @@ function startRun(saved=null) {
     hero,map,gear:restoreGear(saved,hero),ground:createGround(map),difficulty:DIFFICULTIES[selectedDifficulty],difficultyIndex:selectedDifficulty,
     id:saved?.id||globalThis.crypto?.randomUUID?.()||Date.now().toString(36),
     enemies:[],shots:[],fx:[],hazards:[],questions,kills:count(saved?.kills),wave:saved?.wave||0,phase:'intro',clock:0,waveTime:WAVE_SECONDS,
-    time:Number.isFinite(saved?.time)?saved.time:0,shake:0,canSave:true,
+    time:Number.isFinite(saved?.time)?saved.time:0,shake:0,canSave:!memoryOnly,checkpointRevision,
     drops:[],points:saved?.points===undefined?count(saved?.gifts)*9:count(saved.points),
     reserve:count(saved?.reserve),pointFraction:Number.isFinite(saved?.pointFraction)?clamp(saved.pointFraction,0,1):0,
     heldOffers:validOffers(saved?.heldOffers),
@@ -316,14 +338,17 @@ function startRun(saved=null) {
   previous=performance.now();cancelAnimationFrame(frame);frame=requestAnimationFrame(loop);
 }
 
-function saveWave(replace=false) {
-  const current=readCheckpoint();
-  if(!replace&&current&&current.id!==run.id){
-    checkpoint=current;run.canSave=false;
+function saveWave() {
+  const current=readCheckpointState();
+  if(current&&current.revision!==run.checkpointRevision){
+    checkpoint=readCheckpoint();
+    if(run.canSave)notify('另一标签页已更新存档，本页的进度不会覆盖它。');
+    run.canSave=false;
     return;
   }
   const next={
-    id:run.id,hero:HEROES.indexOf(run.hero),map:MAPS.indexOf(run.map),difficulty:run.difficultyIndex,
+    id:run.id,revision:globalThis.crypto?.randomUUID?.()||Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),
+    hero:HEROES.indexOf(run.hero),map:MAPS.indexOf(run.map),difficulty:run.difficultyIndex,
     wave:run.wave,kills:run.kills,time:run.time,player:{...run.player},
     questions:run.questions.map(q=>q[0]),points:run.points,reserve:run.reserve,pointFraction:run.pointFraction,
     gear:run.gear.map(slot=>slot?{key:slot.key,tier:slot.tier}:null),
@@ -331,12 +356,19 @@ function saveWave(replace=false) {
     upgrades:[...run.upgrades],answers:run.answers,correct:run.correct,
   };
   run.canSave=writeLocal(RUN_STORAGE,next);
+  if(run.canSave)run.checkpointRevision=next.revision;
+  else Object.defineProperty(next,'pendingRevision',{value:run.checkpointRevision});
   checkpoint=next;
 }
 
 function clearWaveSave() {
+  const current=readCheckpointState();
+  if(current&&current.revision!==run.checkpointRevision){
+    checkpoint=readCheckpoint();
+    return;
+  }
   if(checkpoint?.id===run.id)checkpoint=null;
-  if(readCheckpoint()?.id===run.id)writeLocal(RUN_STORAGE,null);
+  if(current?.id===run.id&&writeLocal(RUN_STORAGE,null))run.checkpointRevision=null;
 }
 
 function home() {
@@ -364,7 +396,7 @@ function beginWave(restoring=false) {
   p.skill=0;p.ultimate=0;
   run.gear.forEach(slot=>{if(slot){slot.cooldown=0;slot.flash=0}});
   run.shots.length=0;
-  saveWave(run.wave===1);
+  saveWave();
 }
 
 function enemyPosition(radius) {
@@ -1448,11 +1480,11 @@ function drawEquippedWeapons(behind) {
 }
 
 function drawOffscreenThreats() {
-  const {w,h,dpi,scale,warningEdges}=viewport;
+  const {w,h,scale,warningEdges}=viewport;
   const p=run.player;
   const near=run.enemies.filter(e=>e.boss||e.entered<.9);
   if(!near.length)return;
-  ctx.setTransform(dpi,0,0,dpi,0,0);
+  useFieldPixels();
   const {left,right,top,bottom}=warningEdges;
   const position={x:clamp((p.x-camera.x)*scale,left+1,right-1),y:clamp((p.y-camera.y)*scale,top+1,bottom-1)};
   const used=new Set();
@@ -1477,13 +1509,13 @@ function drawOffscreenThreats() {
 }
 
 function draw() {
-  const {w,h,dpi,scale}=viewport,p=run.player;
+  const {w,h,scale}=viewport,p=run.player;
   if(w<=0||h<=0)return;
   const visibleW=w/scale,visibleH=h/scale;
   camera.x=visibleW>=world.w?(world.w-visibleW)/2:clamp(p.x-visibleW/2,0,world.w-visibleW);
   camera.y=visibleH>=world.h?(world.h-visibleH)/2:clamp(p.y-visibleH/2,0,world.h-visibleH);
   const shake=run.shake>0&&!reduceMotion.matches?run.shake*21:0;
-  ctx.setTransform(dpi,0,0,dpi,0,0);ctx.fillStyle='#081a29';ctx.fillRect(0,0,w,h);
+  useFieldPixels();ctx.fillStyle='#081a29';ctx.fillRect(0,0,w,h);
   ctx.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);
   ctx.scale(scale,scale);ctx.translate(-camera.x,-camera.y);
   ctx.drawImage(run.ground,0,0);
@@ -1545,7 +1577,7 @@ function draw() {
   for(const effect of run.fx){if(effect.kind!=='wake'&&inView(effect,effect.r||35))drawEffect(effect)}
   drawOffscreenThreats();
   if(run.hurtGlow>0){
-    ctx.setTransform(dpi,0,0,dpi,0,0);
+    useFieldPixels();
     const size=Math.min(w,h);
     const edge=ctx.createRadialGradient(w/2,h/2,size*.27,w/2,h/2,Math.hypot(w,h)*.54);
     edge.addColorStop(0,'#ef4a7400');edge.addColorStop(1,'#ef4a7473');
@@ -1656,7 +1688,28 @@ document.addEventListener('visibilitychange',()=>{
     else audio.stop();
   }
 });
-window.addEventListener('resize',()=>{if(run){resetInput();resizeField();draw()}else drawSplash(splash,skin)});
+let viewportFrame=null;
+function scheduleViewportFit() {
+  if(viewportFrame!==null)return;
+  viewportFrame=requestAnimationFrame(()=>{
+    viewportFrame=null;
+    if(!run)drawSplash(splash,skin);
+    else if(resizeField()){resetInput();draw()}
+  });
+}
+function orientationChanged() {
+  if(run)resetInput();
+  scheduleViewportFit();
+}
+window.addEventListener('resize',scheduleViewportFit);
+window.addEventListener('orientationchange',orientationChanged);
+window.screen?.orientation?.addEventListener('change',orientationChanged);
+window.visualViewport?.addEventListener('resize',scheduleViewportFit);
+if(window.ResizeObserver){
+  const observer=new window.ResizeObserver(scheduleViewportFit);
+  observer.observe(battle);
+  observer.observe(splash);
+}
 window.addEventListener('storage',e=>{
   if(e.key===RUN_STORAGE&&!run){
     checkpoint=readCheckpoint();
@@ -1728,7 +1781,7 @@ if('serviceWorker' in navigator&&location.protocol!=='file:'){
     const timer=setTimeout(()=>channel.port1.close(),5000);
     channel.port1.onmessage=({data})=>{
       clearTimeout(timer);channel.port1.close();
-      if(data?.type!=='offline-status'||data.version!==6||controller!==navigator.serviceWorker.controller)return;
+      if(data?.type!=='offline-status'||data.version!==7||controller!==navigator.serviceWorker.controller)return;
       offlineReady=data.ready===true;
       const status=$('#offline-status');
       if(status)status.textContent=offlineReady?'离线资源已就绪。当前设备会保留战绩、解锁和每波存档。':'离线资源还在准备，请保持联网并刷新游戏。';
@@ -1736,5 +1789,6 @@ if('serviceWorker' in navigator&&location.protocol!=='file:'){
     controller.postMessage({type:'offline-status'},[channel.port2]);
   };
   navigator.serviceWorker.addEventListener('controllerchange',checkOffline);
-  navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(checkOffline).catch(()=>{});
+  checkOffline();
+  navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).catch(()=>{});
 }

@@ -583,12 +583,24 @@ function drawScenery(ctx,w,h,map=MAPS[0],hero=false) {
   kelp(ctx,w*.98,h,h*.47,'#063a4c');kelp(ctx,w*.10,h,h*.20,'#073343',-1);
 }
 
+function fitCanvas(canvas,w,h) {
+  const dpi=Math.min(devicePixelRatio||1,2);
+  const pixelsWide=Math.max(1,Math.round(w*dpi)),pixelsHigh=Math.max(1,Math.round(h*dpi));
+  const resized=canvas.width!==pixelsWide||canvas.height!==pixelsHigh;
+  if(canvas.width!==pixelsWide)canvas.width=pixelsWide;
+  if(canvas.height!==pixelsHigh)canvas.height=pixelsHigh;
+  // Match the centered crop of CSS object-fit:cover, including fractional CSS pixels.
+  const resolution=Math.min(pixelsWide/w,pixelsHigh/h);
+  return {resized,resolution,x:(pixelsWide-w*resolution)/2,y:(pixelsHigh-h*resolution)/2};
+}
+
 function drawSplash(canvas,backdrop) {
-  const bounds=canvas.getBoundingClientRect();
-  if(!bounds.width||!bounds.height)return;
-  const dpi=Math.min(devicePixelRatio||1,2),w=bounds.width,h=bounds.height;
-  canvas.width=Math.round(w*dpi);canvas.height=Math.round(h*dpi);
-  const ctx=canvas.getContext('2d');ctx.scale(dpi,dpi);
+  const {width:w,height:h}=canvas.getBoundingClientRect();
+  if(!w||!h)return;
+  const {resolution,x:pixelX,y:pixelY}=fitCanvas(canvas,w,h);
+  const ctx=canvas.getContext('2d');
+  ctx.setTransform(resolution,0,0,resolution,pixelX,pixelY);
+  ctx.clearRect(0,0,w,h);
   if(backdrop?.naturalWidth){
     const cover=Math.max(w/backdrop.width,h/backdrop.height);
     ctx.drawImage(backdrop,w-backdrop.width*cover,(h-backdrop.height*cover)*.52,backdrop.width*cover,backdrop.height*cover);
