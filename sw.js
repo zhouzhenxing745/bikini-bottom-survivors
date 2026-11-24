@@ -1,19 +1,20 @@
-const VERSION=5;
+const VERSION=6;
 const CACHE_PREFIX='bikini-bottom-v';
 const CACHE=CACHE_PREFIX+VERSION;
 const PREVIOUS_CACHE=CACHE_PREFIX+(VERSION-1);
 const scope=new URL(self.registration.scope);
 const indexPage=new URL('index.html',scope);
-const versionedFiles=['style.css','data.js','art.js','audio.js','game.js'];
+const baseFiles=['style.css','data.js','art.js','audio.js','game.js'];
+const versionedFiles=version=>version>=6?[...baseFiles,'catalog.js','prep.js']:baseFiles;
 const sharedFiles=['app.webmanifest','undersea.jpg','icon-192.png','icon-512.png'];
 const versionedPath=(file,version)=>file+'?v='+version;
 const scopedUrl=path=>new URL(path,scope).href;
 const assetUrls=[
-  ...versionedFiles.map(file=>scopedUrl(versionedPath(file,VERSION))),
+  ...versionedFiles(VERSION).map(file=>scopedUrl(versionedPath(file,VERSION))),
   ...sharedFiles.map(scopedUrl),
 ];
 const currentAssets=new Set(assetUrls);
-const previousAssets=new Set(versionedFiles.map(file=>scopedUrl(versionedPath(file,VERSION-1))));
+const previousAssets=new Set(versionedFiles(VERSION-1).map(file=>scopedUrl(versionedPath(file,VERSION-1))));
 const bundle=[scope.href,...assetUrls];
 let pendingCacheWrite;
 
@@ -24,7 +25,7 @@ async function fetchAsset(url,shell=false) {
   }
   if(shell){
     const html=await response.clone().text();
-    const matchesVersion=versionedFiles.every(file=>html.includes('"./'+versionedPath(file,VERSION)+'"'));
+    const matchesVersion=versionedFiles(VERSION).every(file=>html.includes('"./'+versionedPath(file,VERSION)+'"'));
     if(!matchesVersion)throw new Error('Game page does not match offline version '+VERSION);
   }else if(response.headers.get('content-type')?.includes('text/html')){
     throw new Error('Received an HTML page for game asset: '+url);

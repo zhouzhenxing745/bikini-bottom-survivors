@@ -45,6 +45,14 @@ const world={w:1200,h:900};
 const WAVE_SECONDS=60;
 const MAX_WAVES=20;
 const xpForLevel=level=>Math.round(85+level*28+level**1.35*8);
+const SLOT_LABELS=['左手','右手','悬浮槽 1','悬浮槽 2'];
+const SLOT_KINDS=['近战','近战','远程','远程'];
+const TIERS=[
+  {damage:1,rate:1,range:1},{damage:1.20,rate:.92,range:1.05},
+  {damage:1.44,rate:.84,range:1.10},{damage:1.73,rate:.76,range:1.15},
+];
+const GOODS=[...PREP_ITEMS.map(({cost,...item})=>({...item,price:cost*9})),...SUPPLIES];
+const count=value=>Number.isInteger(value)&&value>=0?value:0;
 const skin=new Image();
 const splash=$('#splash');
 const touchInput=matchMedia('(any-pointer: coarse)');
@@ -104,7 +112,7 @@ function renderLobby() {
   });
   mapCards.forEach((card,i)=>card.setAttribute('aria-pressed',String(i===selectedMap)));
   difficultyCards.forEach((card,i)=>card.setAttribute('aria-pressed',String(i===selectedDifficulty)));
-  const hero=HEROES[selectedHero],map=MAPS[selectedMap],weapon=WEAPONS[hero.weapon];
+  const hero=HEROES[selectedHero],map=MAPS[selectedMap],weapon=ARMORY[hero.weapon];
   $('#character-info').innerHTML=`<strong>${weapon.glyph} ${weapon.name}</strong><span class="pill">生命 ${hero.hp}</span><span class="pill">${hero.role}</span><span class="hero-perk">${hero.perk}</span>`;
   $('#selection').textContent=checkpoint
     ?`第 ${checkpoint.wave} 波${checkpoint.prep?'后整备':''} · ${HEROES[checkpoint.hero].name}`
@@ -139,15 +147,15 @@ function closeDialog() {
 }
 
 function showGuide() {
-  const weapons=Object.values(WEAPONS).map(w=>`<div><strong>${w.glyph} ${w.name}</strong><small>${w.kind==='挥砍'?'近战':'远程'} · 伤害 ${w.damage} · 攻速 ${(1/w.rate).toFixed(2)} 次/秒 · 范围 ${w.range}</small></div>`).join('');
-  const items=UPGRADES.map(u=>`<div><strong>${u.name}</strong><small>${u.label}</small></div>`).join('');
+  const weapons=Object.values(ARMORY).map(w=>`<div><strong>${w.glyph} ${w.name}</strong><small>${w.kind} · 伤害 ${w.damage} · 攻速 ${(1/w.rate).toFixed(2)} 次/秒 · 范围 ${w.range}</small><small>${w.trait}</small></div>`).join('');
+  const items=GOODS.map(item=>`<div><strong>${item.glyph} ${item.name}</strong><small>${item.label} · 基础价 ${item.price}</small></div>`).join('');
   openDialog('guide','玩法图鉴',`
     <p>拖动摇杆躲避敌人，武器会自动攻击。泡泡旋刃近身击退并减速敌人，水母风暴会跟随你连续放电。</p>
     <p>键盘支持 WASD 或方向键移动，空格释放小技能，Q 释放终极技能，Esc 暂停。</p>
-    <p>每波存活 60 秒，第 5、10、15、20 波还须击败首领。击杀直接获得经验，路过礼包会自动拾取。</p>
-    <p>波后统一升级、答题、升级武器和购买道具。浅海通关会解锁所有角色。战斗按波存档，整备选择会随操作保存。</p>
+    <p>每波存活 60 秒，第 5、10、15、20 波还须击败首领。击杀直接获得经验，靠近掉落物可拾取补给点，漏拾的点数会并入下一波掉落。</p>
+    <p>开局带一把武器，近战和远程各可装备两把。整备可升阶、回收或锁定商品。浅海通关会解锁所有角色。</p>
     <h3>武器</h3><div class="guide-list">${weapons}</div>
-    <h3>强化道具</h3><div class="guide-list">${items}</div>`);
+    <h3>商店道具</h3><div class="guide-list">${items}</div>`);
 }
 
 function showInstall() {
@@ -237,35 +245,57 @@ function createGround(map) {
   return canvas;
 }
 
+const armoryKeys=Object.keys(ARMORY);
+const starterSlot=hero=>ARMORY[hero.weapon].kind==='近战'?0:2;
+function restoreGear(saved,hero) {
+  if(Array.isArray(saved?.gear)){
+    const gear=SLOT_KINDS.map((kind,i)=>{
+      const slot=saved.gear[i];
+      return slot&&armoryKeys.includes(slot.key)&&ARMORY[slot.key].kind===kind
+        ?{key:slot.key,tier:clamp(count(slot.tier),1,4),cooldown:0,flash:0,aim:0}:null;
+    });
+    if(gear.some(Boolean))return gear;
+  }
+  const gear=Array(4).fill(null);
+  gear[starterSlot(hero)]={key:hero.weapon,tier:clamp(count(saved?.player?.weaponTier)+1,1,4),cooldown:0,flash:0,aim:0};
+  return gear;
+}
+
 function startRun(saved=null) {
   closeDialog();resetInput();
   if(saved){
     selectedHero=saved.hero;selectedMap=saved.map;selectedDifficulty=saved.difficulty;
   }
-  const hero=HEROES[selectedHero],map=MAPS[selectedMap],weapon=WEAPONS[hero.weapon];
+  const hero=HEROES[selectedHero],map=MAPS[selectedMap],weapon=ARMORY[hero.weapon];
   const player={
     x:world.w/2,y:world.h/2,hp:hero.hp,maxHp:hero.hp,speed:hero.speed,power:hero.power,rate:hero.id==='squid'?weapon.rate*.82:weapon.rate,
     magnet:map.id==='town'?99:84,range:weapon.range,cooldown:1,invulnerable:0,armor:0,crit:.05,skillPower:1,
-    skill:0,ultimate:0,charge:0,attack:0,xp:0,level:1,need:xpForLevel(1),face:1,steps:0,
+    skill:0,ultimate:0,charge:0,xp:0,level:1,need:xpForLevel(1),face:1,steps:0,
     stride:0,kick:0,cast:0,tilt:0,aim:0,nextTrail:0,skillMax:0,ultimateMax:0,
-    weaponTier:0,weaponDamage:1,
+    recovery:0,pickupBonus:0,luck:0,
   };
   if(saved){
     for(const stat of Object.keys(player)){
       if(stat!=='need'&&Number.isFinite(saved.player[stat]))player[stat]=saved.player[stat];
     }
     player.need=xpForLevel(player.level);
+    if(!Array.isArray(saved.gear)){
+      const oldTier=PREVIOUS_WEAPON_TIERS[count(saved.player.weaponTier)-1];
+      player.rate=clamp(player.rate/(oldTier?.rate||1),UPGRADE_LIMITS.attackInterval,1.8);
+      player.range=clamp(player.range-weapon.range*((oldTier?.range||1)-1),60,UPGRADE_LIMITS.range);
+    }
   }
   const questions=Array.isArray(saved?.questions)?saved.questions.map(id=>QUIZZES.find(q=>q[0]===id)).filter(Boolean):shuffle(QUIZZES);
-  const count=value=>Number.isInteger(value)&&value>=0?value:0;
   run={
-    hero,map,weapon,ground:createGround(map),difficulty:DIFFICULTIES[selectedDifficulty],difficultyIndex:selectedDifficulty,
+    hero,map,gear:restoreGear(saved,hero),ground:createGround(map),difficulty:DIFFICULTIES[selectedDifficulty],difficultyIndex:selectedDifficulty,
     id:saved?.id||globalThis.crypto?.randomUUID?.()||Date.now().toString(36),
     enemies:[],shots:[],fx:[],hazards:[],questions,kills:count(saved?.kills),wave:saved?.wave||0,phase:'intro',clock:0,waveTime:WAVE_SECONDS,
     time:Number.isFinite(saved?.time)?saved.time:0,shake:0,canSave:true,
-    drops:[],gifts:count(saved?.gifts),
+    drops:[],points:saved?.points===undefined?count(saved?.gifts)*9:count(saved.points),
+    reserve:count(saved?.reserve),pointFraction:Number.isFinite(saved?.pointFraction)?clamp(saved.pointFraction,0,1):0,
+    heldOffers:validOffers(saved?.heldOffers),
     upgrades:Array.isArray(saved?.upgrades)?saved.upgrades.filter(name=>UPGRADES.some(u=>u.name===name)):[],
-    inventory:Object.fromEntries(PREP_ITEMS.map(item=>[item.id,Math.min(item.limit,count(saved?.inventory?.[item.id]))])),
+    inventory:Object.fromEntries(GOODS.map(item=>[item.id,Math.min(item.limit,count(saved?.inventory?.[item.id]))])),
     answers:count(saved?.answers),correct:count(saved?.correct),player,
   };
   audio.unlock();audio.start(()=>run?.wave||1,true);
@@ -274,7 +304,8 @@ function startRun(saved=null) {
   portrait.clearRect(0,0,48,48);drawHero(portrait,hero.id,24,23,.77);
   resizeField();drawPaused=false;
   if(saved?.prep){
-    run.phase='prep';run.waveTime=0;run.prep=saved.prep;
+    run.phase='prep';run.waveTime=0;
+    run.prep={rerolls:count(saved.prep.rerolls),level:saved.prep.level||null,offers:shopOffers(validOffers(saved.prep.offers))};
     audio.stop();showPrep();
   }else{
     beginWave(Boolean(saved));
@@ -294,7 +325,9 @@ function saveWave(replace=false) {
   const next={
     id:run.id,hero:HEROES.indexOf(run.hero),map:MAPS.indexOf(run.map),difficulty:run.difficultyIndex,
     wave:run.wave,kills:run.kills,time:run.time,player:{...run.player},
-    questions:run.questions.map(q=>q[0]),gifts:run.gifts,inventory:{...run.inventory},prep:run.prep||null,
+    questions:run.questions.map(q=>q[0]),points:run.points,reserve:run.reserve,pointFraction:run.pointFraction,
+    gear:run.gear.map(slot=>slot?{key:slot.key,tier:slot.tier}:null),
+    inventory:{...run.inventory},prep:run.prep||null,heldOffers:run.heldOffers,
     upgrades:[...run.upgrades],answers:run.answers,correct:run.correct,
   };
   run.canSave=writeLocal(RUN_STORAGE,next);
@@ -325,10 +358,11 @@ function beginWave(restoring=false) {
   run.clock=run.hasBoss?1.9:1.5;
   const p=run.player;
   if(restoring)return;
-  const healing=run.difficulty.heal+(run.hero.id==='sponge'?8:0)+(run.map.id==='krusty'?4:0);
+  const healing=run.difficulty.heal+(run.hero.id==='sponge'?8:0)+(run.map.id==='krusty'?4:0)+p.recovery;
   p.hp=Math.min(p.maxHp,p.hp+healing);
   p.charge=Math.min(100,p.charge+12);
   p.skill=0;p.ultimate=0;
+  run.gear.forEach(slot=>{if(slot){slot.cooldown=0;slot.flash=0}});
   run.shots.length=0;
   saveWave(run.wave===1);
 }
@@ -346,7 +380,7 @@ function enemyPosition(radius) {
   return spot;
 }
 
-function spawnEnemy(boss=false,forcedType=null,area=null) {
+function spawnEnemy(boss=false,forcedType=null,area=null,summoned=false) {
   const wave=run.wave,diff=run.difficulty;
   const pool=['jelly','jelly','jelly','blue'];
   if(wave>=4)pool.push('blue','robot');
@@ -354,16 +388,19 @@ function spawnEnemy(boss=false,forcedType=null,area=null) {
   if(wave>=12)pool.push('spitter','robot');
   const type=boss?'boss':forcedType||pool[Math.floor(Math.random()*pool.length)];
   const spec=boss?BOSSES[wave/5-1]:ENEMY_TYPES[type];
-  const hp=Math.round(spec.hp*(boss?diff.bossHp:diff.hp*(1+(wave-1)*.024)));
+  const healthScale=boss?diff.bossHp*(1+.29*(wave/5-1)**1.45)
+    :diff.hp*(1+(wave-1)*.059+Math.max(0,wave-5)*.075);
+  const hp=Math.round(spec.hp*healthScale);
   const position=area||enemyPosition(boss?Math.min(290,Math.max(211,viewport.w*.45/viewport.scale)):190+Math.random()*108);
   const e={...position,type,boss,hp,maxHp:hp,name:spec.name,color:spec.color,attack:spec.attack,moves:spec.moves,interval:spec.interval,
     attackClock:boss?1.55:1.9+Math.random()*1.3,activeMove:null,pattern:0,windup:0,castTime:0,rush:0,rushAngle:0,
-    size:boss?35+wave*.68:spec.size,damage:spec.damage*diff.damage*(boss?1:1+(wave-1)*.017),xp:boss?spec.xp:area?1:spec.xp,
-    speed:spec.speed*diff.speed*(run.map.id==='jelly'?1.1:1)*(1+wave*.005),flash:0,slow:0,dx:0,dy:0,
-    entered:0,phase:Math.random()*TAU};
+    size:boss?35+wave*.68:spec.size,damage:spec.damage*diff.damage*(boss?1+(wave-5)*.019:1+(wave-1)*.029),
+    xp:boss?spec.xp:summoned?.5:spec.xp*.47,
+    speed:spec.speed*diff.speed*(run.map.id==='jelly'?1.1:1)*(1+wave*.007)*(boss?1:{jelly:.92,blue:.87,spitter:.95,robot:1.05}[type]),
+    flash:0,slow:0,dx:0,dy:0,entered:0,phase:Math.random()*TAU,summoned};
   run.enemies.push(e);
   if(boss)run.boss=e;
-  ring(e.x,e.y,e.size*1.85,e.color,.52);
+  if(boss||!area||summoned)ring(e.x,e.y,e.size*1.85,e.color,.52);
 }
 
 function ring(x,y,r,color,life) {
@@ -381,8 +418,31 @@ function floatText(x,y,text,color,big=false) {
   run.fx.push({kind:'text',x,y,text,color,big,life:.69,max:.69});
 }
 
-function weaponDamage(p=run.player) {
-  return run.weapon.damage*p.power*p.weaponDamage;
+function weaponStats(slot) {
+  const p=run.player,weapon=ARMORY[slot.key],base=ARMORY[run.hero.weapon],tier=TIERS[slot.tier-1];
+  return {
+    damage:weapon.damage*p.power*tier.damage,
+    rate:Math.max(.23,weapon.rate*(p.rate/base.rate)*tier.rate),
+    range:clamp(weapon.range*tier.range+p.range-base.range,70,UPGRADE_LIMITS.range),
+  };
+}
+
+function weaponMount(index) {
+  const p=run.player;
+  if(index<2)return {x:p.x+(index===0?-23:23),y:p.y+4};
+  const a=run.time*1.85+(index-2)*Math.PI;
+  return {x:p.x+Math.cos(a)*39,y:p.y-13+Math.sin(a)*19};
+}
+
+function materialDrop(e) {
+  const decay=run.wave<=4?1:Math.max(.5,1-run.wave*.015);
+  const dropRate=e.type==='robot'?.59:e.type==='spitter'?.33:run.wave<=3?.22:.26;
+  const chance=decay*dropRate;
+  if(e.summoned||(!e.boss&&Math.random()>=chance))return;
+  const value=e.boss?12:e.type==='robot'?3:e.type==='spitter'?2:1;
+  const owed=Math.min(run.reserve,3);
+  run.reserve-=owed;
+  run.drops.push({x:e.x,y:e.y,kind:'point',value:value+owed});
 }
 
 function damageEnemy(e,damage,knock=0,critical=false) {
@@ -400,8 +460,8 @@ function damageEnemy(e,damage,knock=0,critical=false) {
   if(e.hp>0)return;
   run.kills++;p.charge=Math.min(100,p.charge+(e.boss?32:3.25));
   p.xp+=e.xp*run.difficulty.xp*(run.hero.id==='krabs'?1.25:1)*(run.map.id==='jelly'?1.15:1);
-  if(e.boss||run.kills%10===0)run.drops.push({x:e.x,y:e.y,kind:'gift',value:e.boss?3:1});
-  if(e.boss||run.kills%run.difficulty.burger===0)run.drops.push({x:e.x+10,y:e.y+8,kind:'heal'});
+  materialDrop(e);
+  if(e.boss||run.kills%(run.difficulty.burger*2)===0)run.drops.push({x:e.x+10,y:e.y+8,kind:'heal'});
 }
 
 function hurt(base) {
@@ -414,38 +474,86 @@ function hurt(base) {
   audio.effect('hurt');
 }
 
-function attack() {
-  const p=run.player,w=run.weapon;
-  let target=null, nearest=p.range;
-  for(const e of run.enemies){
-    if(e.hp<=0)continue;
-    const d=distance(e,p)-e.size*.3;
-    if(d<nearest){nearest=d;target=e}
-  }
-  if(!target)return;
-  p.attack=p.rate;p.kick=.29;
-  const angle=Math.atan2(target.y-p.y,target.x-p.x);
-  p.face=Math.cos(angle)<0?-1:1;p.aim=angle;
+const MELEE={
+  slash:{arc:.94,limit:5,falloff:.7},cleave:{arc:1.34,limit:8,falloff:.73},
+  thrust:{arc:.23,limit:2,falloff:.82},
+};
+const PROJECTILES={
+  rock:{speed:555,radius:9,pierce:0},note:{speed:722,radius:7,pierce:1},
+  bubble:{speed:620,radius:9,pierce:0},dart:{speed:855,radius:5,pierce:0},
+};
+
+function attack(dt) {
+  const p=run.player;
+  run.gear.forEach((slot,index)=>{
+    if(!slot)return;
+    slot.cooldown=Math.max(0,slot.cooldown-dt);
+    if(slot.cooldown>0)return;
+    const origin=weaponMount(index),stats=weaponStats(slot);
+    let target=null,nearest=stats.range;
+    for(const enemy of run.enemies){
+      if(enemy.hp<=0)continue;
+      const d=distance(enemy,origin)-enemy.size*.3;
+      if(d<nearest){nearest=d;target=enemy}
+    }
+    if(!target)return;
+    fireWeapon(slot,origin,target,nearest,stats);
+  });
+}
+
+function fireWeapon(slot,origin,target,nearest,stats) {
+  const p=run.player,w=ARMORY[slot.key];
+  slot.cooldown=stats.rate;slot.flash=.25;
+  const angle=Math.atan2(target.y-origin.y,target.x-origin.x);
+  slot.aim=angle;
+  p.kick=.27;p.face=Math.cos(angle)<0?-1:1;p.aim=angle;
   const critical=Math.random()<p.crit;
-  const damage=weaponDamage(p)*(critical?1.8:1);
-  audio.effect(run.hero.weapon);
-  if(w.kind==='挥砍'){
-    const swing=run.hero.weapon==='claw'?.78:run.hero.weapon==='net'?1.05:.92;
-    run.fx.push({kind:'slash',x:p.x,y:p.y,angle,swing,r:Math.max(65,nearest+target.size*.82),color:w.color,weapon:run.hero.weapon,life:.3,max:.3});
+  const damage=stats.damage*(critical?1.8:1);
+  const {style}=w;
+  const melee=MELEE[style];
+  if(melee){
+    const radius=Math.min(stats.range+15,Math.max(69,nearest+target.size*.88));
+    run.fx.push({kind:style==='thrust'?'lance':'slash',...origin,angle,swing:melee.arc,r:radius,color:w.color,
+      weapon:slot.key,life:.28,max:.28});
+    damageEnemy(target,damage,w.knock,critical);
+    let count=1;
     for(const e of run.enemies){
-      const a=Math.atan2(e.y-p.y,e.x-p.x)-angle;
-      if(e===target||(distance(e,p)<p.range+e.size*.3&&Math.cos(a)>=Math.cos(swing))){
-        damageEnemy(e,damage*(e===target?1:.72),w.knock,critical);
+      if(count>=melee.limit)break;
+      if(e===target||e.hp<=0||distance(e,origin)>stats.range+e.size*.3)continue;
+      const bearing=Math.atan2(e.y-origin.y,e.x-origin.x);
+      if(Math.cos(bearing-angle)>=Math.cos(melee.arc)){
+        damageEnemy(e,damage*melee.falloff,w.knock*.76,critical);
+        count++;
       }
     }
     audio.effect(critical?'critical':'hit');
-  }else{
-    const speed=w.kind==='投掷'?540:w.kind==='音波'?725:620;
-    const x=p.x+Math.cos(angle)*12,y=p.y+Math.sin(angle)*12;
-    run.shots.push({x,y,dx:Math.cos(angle)*speed,dy:Math.sin(angle)*speed,
-      color:w.color,damage,critical,knock:w.knock,range:(p.range+38)/speed,r:w.kind==='气泡'?9:7,kind:w.kind});
-    ring(x,y,22,w.color,.18);
+    return;
   }
+  const dx=Math.cos(angle),dy=Math.sin(angle);
+  if(style==='beam'){
+    const travel={x:dx,y:dy,length:stats.range+18};
+    const targets=run.enemies.filter(e=>e.hp>0).map(e=>({e,hit:shotContact(origin,e,e.size+5,travel)}))
+      .filter(entry=>entry.hit<Infinity).sort((a,b)=>a.hit-b.hit).slice(0,3);
+    targets.forEach(({e},i)=>damageEnemy(e,damage*.77**i,w.knock,critical));
+    run.fx.push({kind:'beam',...origin,angle,r:travel.length,color:w.color,life:.2,max:.2});
+    audio.effect(critical?'critical':'clarinet');
+    return;
+  }
+  const shot=PROJECTILES[style];
+  run.shots.push({...origin,dx:dx*shot.speed,dy:dy*shot.speed,color:w.color,damage,critical,knock:w.knock,
+    range:(stats.range+38)/shot.speed,r:shot.radius,pierce:shot.pierce,hits:[],kind:style});
+  ring(origin.x,origin.y,17,w.color,.15);
+  audio.effect({rock:'rock',note:'clarinet',bubble:'bubble',dart:'net'}[style]);
+}
+
+function closestShotTarget(shot,travel) {
+  let target=null,nearest=Infinity;
+  for(const e of run.enemies){
+    if(e.hp<=0||shot.hits.includes(e))continue;
+    const contact=shotContact(shot,e,shot.r+e.size,travel);
+    if(contact<nearest){target=e;nearest=contact}
+  }
+  return target;
 }
 
 function enemyShot(e,a,speed,damage=e.damage) {
@@ -494,7 +602,7 @@ function bossAttack(e,p,angle,dt) {
       for(let i=0;i<slots;i++){
         const a=e.aim+i*TAU/slots;
         const area={x:clamp(e.x+Math.cos(a)*100,29,world.w-29),y:clamp(e.y+Math.sin(a)*100,29,world.h-29)};
-        if(distance(area,p)>75)spawnEnemy(false,i%2?'robot':'blue',area);
+        if(distance(area,p)>75)spawnEnemy(false,i%2?'robot':'blue',area,true);
       }
       ring(e.x,e.y,116,e.color,.45);
     }
@@ -600,16 +708,14 @@ function updateShots(dt) {
     if(shot.hostile){
       if(shotContact(shot,p,shot.r+13,travel)<Infinity){hurt(shot.damage);shot.range=0}
     }else{
-      let hit=null,nearest=Infinity;
-      for(const e of run.enemies){
-        if(e.hp<=0)continue;
-        const contact=shotContact(shot,e,shot.r+e.size,travel);
-        if(contact<nearest){hit=e;nearest=contact}
-      }
-      if(hit){
-        damageEnemy(hit,shot.damage,shot.knock,shot.critical);shot.range=0;
-        if(run.hero.id==='gary')hit.slow=2;
+      let hit;
+      while((hit=closestShotTarget(shot,travel))){
+        damageEnemy(hit,shot.damage,shot.knock,shot.critical);
+        if(shot.kind==='bubble'||run.hero.id==='gary')hit.slow=Math.max(hit.slow,2);
         audio.effect(shot.critical?'critical':'hit');
+        if(!shot.pierce){shot.range=0;break}
+        shot.hits.push(hit);
+        shot.pierce--;shot.damage*=.68;
       }
     }
     shot.x+=travel.x*travel.length;shot.y+=travel.y*travel.length;shot.range-=dt;
@@ -621,13 +727,14 @@ function updateDrops(dt) {
   const p=run.player;
   for(const drop of run.drops){
     const d=distance(drop,p);
-    const pickup=drop.kind==='gift'?38+Math.min(26,p.magnet*.11):p.magnet*.66;
+    const pickup=drop.kind==='point'?26+p.magnet*.60:p.magnet*.66;
     if(drop.kind==='heal'&&p.hp===p.maxHp)continue;
     if(d<21){
-      if(drop.kind==='gift'){
-        run.gifts+=drop.value;
-        floatText(p.x,p.y-30,'+'+drop.value+' 礼包','#ffd77a');
-        ring(p.x,p.y,31,'#ffd77a',.27);
+      if(drop.kind==='point'){
+        const value=drop.value*(1+p.pickupBonus)+run.pointFraction;
+        const points=Math.floor(value+1e-7);
+        run.points+=points;run.pointFraction=Math.max(0,value-points);
+        if(drop.value>=3)floatText(p.x,p.y-30,'+'+points,'#ffd77a');
         audio.effect('gift');
       }else{
         const amount=Math.min(p.maxHp-p.hp,17);
@@ -717,15 +824,33 @@ function spawnDuringWave(dt) {
   const pressure=WAVE_SECONDS-run.waveTime;
   const late=pressure>44;
   const bossAlive=run.boss?.hp>0;
-  const cap=run.difficulty.crowd+Math.floor(run.wave/4)+(late?2:0)-(bossAlive?3:0);
+  const cap=Math.min(46,13+run.difficulty.crowd+Math.floor(run.wave*.43)+(late?3:0)-(bossAlive?3:0));
   if(run.enemies.length>=cap){
-    run.spawn=.21;
+    run.spawn=.16;
     return;
   }
-  const delay=Math.max(.68,1.63-run.wave*.035-run.difficulty.count*.07-(late?.19:0));
-  spawnEnemy();
-  if(pressure>17&&run.enemies.length<cap&&Math.random()<.14+run.wave*.008)spawnEnemy();
-  run.spawn=delay*(bossAlive?1.28:1)*(.84+Math.random()*.34);
+  const roll=Math.random();
+  const type=run.wave>=4&&roll<.18?'robot':run.wave>=3&&roll<.42?'spitter':run.wave>=2&&roll>.77?'blue':'jelly';
+  const amount=type==='robot'?1:(type==='spitter'?2:5)+Number(Math.random()<.56);
+  const capacity=cap-run.enemies.length;
+  if(capacity<Math.ceil(amount/2)){
+    run.spawn=.18;
+    return;
+  }
+  const center=enemyPosition(226+Math.random()*94);
+  const formation=Math.random()*TAU;
+  for(let i=0;i<Math.min(capacity,amount);i++){
+    const angle=formation+i*TAU/amount;
+    const radius=amount===1?0:amount<4?21:34;
+    const spot={
+      x:clamp(center.x+Math.cos(angle)*radius,25,world.w-25),
+      y:clamp(center.y+Math.sin(angle)*radius,25,world.h-25),
+    };
+    spawnEnemy(false,type,spot);
+  }
+  ring(center.x,center.y,amount===1?27:amount<4?40:52,ENEMY_TYPES[type].color,.52);
+  const delay=Math.max(.71,1.22-run.wave*.018-run.difficulty.count*.052-(late?.12:0));
+  run.spawn=delay*(bossAlive?1.2:1)*(.87+Math.random()*.28);
 }
 
 function update(dt) {
@@ -753,7 +878,8 @@ function update(dt) {
       dx:-x/len*25,dy:-y/len*25,r:5+p.stride*3,color:run.hero.color,life:.32,max:.32});
   }
   p.kick=Math.max(0,p.kick-dt);p.cast=Math.max(0,p.cast-dt);run.hurtGlow=Math.max(0,(run.hurtGlow||0)-dt);
-  p.attack=Math.max(0,p.attack-dt);p.invulnerable-=dt;p.skill-=dt;p.ultimate-=dt;run.shake-=dt;
+  p.invulnerable-=dt;p.skill-=dt;p.ultimate-=dt;run.shake-=dt;
+  run.gear.forEach(slot=>{if(slot)slot.flash=Math.max(0,slot.flash-dt)});
   for(const fx of run.fx){
     fx.life-=dt;
     if(fx.kind==='spark'||fx.kind==='wake'){fx.x+=fx.dx*dt;fx.y+=fx.dy*dt}
@@ -774,7 +900,7 @@ function update(dt) {
     run.waveTime=Math.max(0,run.waveTime-dt);
     releaseQueuedSkills();
     spawnDuringWave(dt);
-    if(p.attack<=0)attack();
+    attack(dt);
     tickStorm(dt);updateEnemies(dt);updateShots(dt);updateHazards(dt);updateDrops(dt);
     run.enemies=run.enemies.filter(e=>e.hp>0);
     if(p.hp<=0){finish(false);return}
@@ -810,15 +936,76 @@ function prepareLevel() {
   audio.effect('level');
 }
 
-function shopItems() {
-  return shuffle(PREP_ITEMS.filter(item=>run.inventory[item.id]<item.limit&&(!item.available||item.available(run.player))))
-    .slice(0,4).map(item=>item.id);
+const sellableItem=id=>GOODS.find(item=>item.id===id);
+const itemAvailable=item=>run.inventory[item.id]<item.limit&&(!item.available||item.available(run.player));
+const shopPrice=base=>Math.max(1,Math.floor(base*(1+.055*run.wave)+Math.sqrt(run.wave)));
+const tierPrice=tier=>[1,1.65,2.52,3.7][tier-1];
+const refreshPrice=()=>3+Math.floor(run.wave*.5)+(run.prep.rerolls+1)*(2+Math.floor(run.wave/8));
+
+function validOffers(raw) {
+  if(!Array.isArray(raw))return [];
+  return raw.filter(entry=>entry&&Number.isInteger(entry.price)&&entry.price>0&&
+    (entry.type==='weapon'?armoryKeys.includes(entry.id):entry.type==='item'&&sellableItem(entry.id))).slice(0,4).map(entry=>({
+      id:entry.id,type:entry.type,price:entry.price,tier:clamp(count(entry.tier),1,4),
+      locked:entry.locked===true,sold:entry.sold===true,discount:entry.discount===true,
+    }));
+}
+
+function weaponDestination(offer) {
+  const kind=ARMORY[offer.id].kind;
+  const merge=run.gear.findIndex(slot=>slot?.key===offer.id&&slot.tier===offer.tier&&slot.tier<4);
+  if(merge>=0)return {index:merge,merge:true};
+  return {index:run.gear.findIndex((slot,i)=>!slot&&SLOT_KINDS[i]===kind),merge:false};
+}
+
+function shopOffers(kept=[]) {
+  const offers=[...kept],used=new Set(offers.map(offer=>offer.id));
+  const missing=SLOT_KINDS.filter((_,i)=>!run.gear[i]);
+  const guaranteed=missing.includes('近战')&&missing.includes('远程')?SLOT_KINDS[starterSlot(run.hero)]==='近战'?'远程':'近战':missing[0];
+  const firstWeapon=offers.every(offer=>offer.type!=='weapon'||offer.sold);
+  const items=shuffle(GOODS.filter(item=>itemAvailable(item)&&!used.has(item.id)));
+  while(offers.length<4){
+    const heldWeapons=offers.filter(entry=>entry.type==='weapon').length;
+    const isStarterOffer=firstWeapon&&heldWeapons===0;
+    const type=isStarterOffer||!items.length||((heldWeapons<2||!offers.some(entry=>entry.type==='item'))&&Math.random()<.49)?'weapon':'item';
+    if(type==='weapon'){
+      let keys=armoryKeys.filter(key=>!used.has(key));
+      if(isStarterOffer&&guaranteed){
+        const compatible=keys.filter(key=>ARMORY[key].kind===guaranteed);
+        if(compatible.length)keys=compatible;
+      }
+      if(isStarterOffer&&run.wave<=2){
+        const affordable=keys.filter(key=>ARMORY[key].price<=34);
+        if(affordable.length)keys=affordable;
+      }
+      const id=keys[Math.floor(Math.random()*keys.length)];
+      const p=run.player;
+      const rankRoll=Math.random();
+      const tier=!isStarterOffer&&run.wave>=10&&rankRoll<.04+p.luck*.004?3
+        :!isStarterOffer&&run.wave>=4&&rankRoll<.13+run.wave*.009+p.luck*.006?2:1;
+      const openingDeal=isStarterOffer&&run.wave===1;
+      const discount=openingDeal||Math.random()<.03+p.luck*.006;
+      const price=shopPrice(ARMORY[id].price*tierPrice(tier)*(openingDeal?.8:discount?.86:1));
+      offers.push({id,type,tier,locked:false,sold:false,discount,price});
+      used.add(id);
+    }else{
+      const item=items.pop();
+      const discount=Math.random()<.04+run.player.luck*.007;
+      offers.push({id:item.id,type,tier:1,locked:false,sold:false,discount,price:shopPrice(item.price*(discount?.86:1))});
+      used.add(item.id);
+    }
+  }
+  return offers;
 }
 
 function beginPrep() {
   if(run.wave===MAX_WAVES){finish(true);return}
-  run.phase='prep';run.drops.length=0;
-  run.prep={offers:shopItems(),bought:[],level:null};
+  run.phase='prep';
+  run.reserve+=run.drops.reduce((value,drop)=>value+(drop.kind==='point'?drop.value:0),0);
+  run.drops.length=0;
+  run.points+=9+Math.floor(run.wave*.48);
+  run.prep={offers:shopOffers(run.heldOffers),rerolls:0,level:null};
+  run.heldOffers=[];
   resetInput();audio.stop();
   prepareLevel();
   saveWave();showPrep();
@@ -846,27 +1033,17 @@ function levelPanel(level) {
 
 function showPrep(focusSelector) {
   const p=run.player;
-  const next=WEAPON_TIERS[p.weaponTier];
-  const offers=run.prep.offers.map(id=>PREP_ITEMS.find(item=>item.id===id)).filter(Boolean);
-  const cards=offers.map(item=>{
-    const sold=run.prep.bought.includes(item.id)||run.inventory[item.id]>=item.limit;
-    const capped=item.available&&!item.available(p);
-    return `<button class="shop-item" data-buy-item="${item.id}" ${sold||capped||run.gifts<item.cost?'disabled':''}>
-      <strong><span>${item.glyph}</span> ${item.name}</strong><small>${item.label}</small>
-      <b>${sold?'已购':capped?'属性已满':item.cost+' 礼包'}</b></button>`;
-  }).join('');
-  const inventory=PREP_ITEMS.filter(item=>run.inventory[item.id]>0).map(item=>item.name+' ×'+run.inventory[item.id]).join('　');
   const scroll=dialogKind==='prep'?modal.scrollTop:0;
+  const statsOpen=dialogKind==='prep'&&content.querySelector('.prep-build')?.open;
   openDialog('prep','第 '+run.wave+' 波后整备',`
-    <div class="prep-heading"><span>下一波 · ${(run.wave+1)%5===0?'首领战':'生存战'}</span><strong>▦ ${run.gifts} 礼包</strong></div>
+    <div class="prep-heading"><span>下一波 · ${(run.wave+1)%5===0?'首领战':'生存战'}</span><strong>补给点 ${run.points}</strong></div>
     ${levelPanel(run.prep.level)}
-    <section class="loadout-weapon" aria-label="武器">
-      <div><h3>${run.weapon.glyph} ${run.weapon.name} · ${run.weapon.kind==='挥砍'?'近战':'远程'} ${p.weaponTier+1} 阶</h3>
-      <p>伤害 ${Math.round(weaponDamage(p))} · 攻速 ${(1/p.rate).toFixed(2)} 次/秒 · 范围 ${Math.round(p.range)}</p></div>
-      <button class="dark-button" data-buy-weapon ${!next||run.gifts<next.cost?'disabled':''}>${next?'升武器 · '+next.cost+' 礼包':'武器已满阶'}</button>
-    </section>
-    <h3>道具补给</h3><div class="shop-grid">${cards||'<p>道具购买上限已达。</p>'}</div>
-    ${inventory?'<p class="inventory-line">已装备 · '+inventory+'</p>':''}
+    <details class="prep-build"${statsOpen?' open':''}><summary>当前属性</summary>
+      <p>生命 ${Math.ceil(p.hp)} / ${p.maxHp} · 护甲 ${p.armor} · 移速 ${Math.round(p.speed)} · 暴击 ${Math.round(p.crit*100)}%</p>
+      <p>拾取增益 ${Math.round(p.pickupBonus*100)}% · 幸运 ${p.luck} · 波初额外回复 ${p.recovery}</p>
+    </details>
+    ${renderArmory(armoryModel())}
+    ${run.reserve?`<p>漏拾 <strong>${run.reserve}</strong> 点补给会并入下一波掉落。</p>`:''}
     <div class="dialog-actions prep-actions">
       <button class="primary" data-next-wave ${!levelComplete()||p.xp>=p.need?'disabled':''}>进入第 ${run.wave+1} 波</button>
       <button class="dark-button" data-home>保存并返回大厅</button>
@@ -876,6 +1053,55 @@ function showPrep(focusSelector) {
     content.querySelector(focusSelector)?.focus({preventScroll:true});
   }
   updateHud();
+}
+
+const slotUpgradePrice=slot=>shopPrice(ARMORY[slot.key].price*(1+slot.tier*.46));
+const slotSellPrice=slot=>Math.max(1,Math.floor(shopPrice(ARMORY[slot.key].price*tierPrice(slot.tier))*.25));
+const canSellWeapon=()=>run.gear.filter(Boolean).length>1;
+
+function armoryModel() {
+  const slots=run.gear.map((slot,index)=>{
+    const layout={index,label:SLOT_LABELS[index],kind:SLOT_KINDS[index]};
+    if(!slot)return {...layout,weapon:null};
+    const {name,glyph}=ARMORY[slot.key],stats=weaponStats(slot);
+    const upgradePrice=slot.tier<4?slotUpgradePrice(slot):null;
+    return {...layout,weapon:{name,glyph,tier:slot.tier,damage:Math.round(stats.damage),speed:1/stats.rate,range:Math.round(stats.range)},
+      upgradePrice,canUpgrade:upgradePrice!==null&&run.points>=upgradePrice,sellPrice:canSellWeapon()?slotSellPrice(slot):null};
+  });
+  const offers=run.prep.offers.map((offer,index)=>{
+    const funded=run.points>=offer.price;
+    const common={...offer,index};
+    const sale=offer.discount?' · 折扣':'';
+    if(offer.type==='item'){
+      const item=sellableItem(offer.id),available=itemAvailable(item);
+      return {...common,name:item.name,glyph:item.glyph,detail:item.label+sale,
+        canBuy:available&&funded,buyLabel:!available?'已达上限':funded?'购买':'点数不足'};
+    }
+    const w=ARMORY[offer.id],destination=weaponDestination(offer),tier=TIERS[offer.tier-1];
+    return {...common,name:w.name,glyph:w.glyph,kind:w.kind+' · '+offer.tier+' 阶',
+      detail:`伤害 ${Math.round(w.damage*tier.damage)} · 攻速 ${(1/(w.rate*tier.rate)).toFixed(2)} · 射程 ${Math.round(w.range*tier.range)}。 ${w.trait}${sale}`,
+      canBuy:funded&&destination.index>=0,
+      buyLabel:destination.index<0?'槽位已满':!funded?'点数不足':destination.merge?'合成升阶':'购买并装备'};
+  });
+  return {slots,offers,points:run.points,wave:run.wave,nextBoss:(run.wave+1)%5===0,
+    inventory:GOODS.filter(item=>run.inventory[item.id]>0).map(item=>item.name+' ×'+run.inventory[item.id]).join('　'),
+    reroll:{price:refreshPrice(),enabled:run.points>=refreshPrice()&&run.prep.offers.some(entry=>!entry.locked||entry.sold)}};
+}
+
+function buyOffer(offer) {
+  if(!offer||offer.sold||run.points<offer.price)return false;
+  if(offer.type==='weapon'){
+    const {index,merge}=weaponDestination(offer);
+    if(index<0)return false;
+    if(merge)run.gear[index].tier++;
+    else run.gear[index]={key:offer.id,tier:offer.tier,cooldown:0,flash:0,aim:0};
+  }else{
+    const item=sellableItem(offer.id);
+    if(!item||!itemAvailable(item))return false;
+    run.inventory[item.id]++;item.apply(run.player);
+  }
+  run.points-=offer.price;offer.sold=true;offer.locked=false;audio.effect('gift');
+  return true;
 }
 
 function prepAction(button) {
@@ -898,20 +1124,30 @@ function prepAction(button) {
     focus=level.selected===null?'[data-upgrade]:not(:disabled)':'.prep-actions button:not(:disabled)';
   }else if(button.hasAttribute('data-next-level')&&levelComplete()&&p.xp>=p.need){
     prepareLevel();focus='[data-upgrade]';
-  }else if(button.hasAttribute('data-buy-weapon')){
-    const next=WEAPON_TIERS[p.weaponTier],equipped=WEAPON_TIERS[p.weaponTier-1]||{rate:1,range:1};
-    if(!next||run.gifts<next.cost)return;
-    run.gifts-=next.cost;p.weaponTier++;p.weaponDamage=next.damage;
-    p.rate=Math.max(UPGRADE_LIMITS.attackInterval,p.rate*next.rate/equipped.rate);
-    p.range=Math.min(UPGRADE_LIMITS.range,p.range+run.weapon.range*(next.range-equipped.range));
-    audio.effect('gift');focus='[data-buy-weapon]';
-  }else if(button.dataset.buyItem){
-    const item=PREP_ITEMS.find(entry=>entry.id===button.dataset.buyItem);
-    if(!item||!run.prep.offers.includes(item.id)||run.prep.bought.includes(item.id)||p.hp<=0||
-      run.gifts<item.cost||run.inventory[item.id]>=item.limit||(item.available&&!item.available(p)))return;
-    run.gifts-=item.cost;run.inventory[item.id]++;run.prep.bought.push(item.id);item.apply(p);
-    audio.effect('gift');focus='.shop-item:not(:disabled)';
+  }else if(button.dataset.offerBuy!==undefined){
+    if(!buyOffer(run.prep.offers[Number(button.dataset.offerBuy)]))return;
+    focus='[data-offer-buy]:not(:disabled)';
+  }else if(button.dataset.offerLock!==undefined){
+    const index=Number(button.dataset.offerLock),entry=run.prep.offers[index];
+    if(!entry||entry.sold)return;
+    entry.locked=!entry.locked;focus=`[data-offer-lock="${index}"]`;
+  }else if(button.dataset.slotUpgrade!==undefined){
+    const index=Number(button.dataset.slotUpgrade),slot=run.gear[index];
+    if(!slot||slot.tier>=4||run.points<slotUpgradePrice(slot))return;
+    run.points-=slotUpgradePrice(slot);slot.tier++;audio.effect('gift');
+    focus=`[data-slot-upgrade="${index}"]`;
+  }else if(button.dataset.slotSell!==undefined){
+    const index=Number(button.dataset.slotSell),slot=run.gear[index];
+    if(!slot||!canSellWeapon())return;
+    run.points+=slotSellPrice(slot);run.gear[index]=null;audio.effect('gift');
+    focus='[data-offer-buy]:not(:disabled)';
+  }else if(button.hasAttribute('data-shop-reroll')){
+    const kept=run.prep.offers.filter(entry=>entry.locked&&!entry.sold);
+    if(kept.length===4||run.points<refreshPrice())return;
+    run.points-=refreshPrice();run.prep.rerolls++;run.prep.offers=shopOffers(kept);
+    focus='[data-shop-reroll]';
   }else if(button.hasAttribute('data-next-wave')&&levelComplete()&&p.xp<p.need){
+    run.heldOffers=run.prep.offers.filter(entry=>entry.locked&&!entry.sold);
     closeDialog();beginWave();audio.unlock();audio.start(()=>run.wave);return;
   }else return;
   saveWave();showPrep(focus);
@@ -943,18 +1179,14 @@ function pause() {
     return;
   }
   resetInput();audio.stop();
-  const p=run.player;
   let checkpointHint='当前对局可以在此继续。';
   if(checkpoint?.id===run.id){
     checkpointHint=run.canSave?`存档位于第 ${checkpoint.wave} 波开头。返回大厅或重开网页后可继续。`
       :`本次打开期间，可以从第 ${checkpoint.wave} 波开头继续。`;
   }
-  openDialog('pause','战斗暂停',`<p>第 ${run.wave} / 20 波 · ${run.weapon.name}</p>
-    <dl class="result-stats">
-      <div><dt>攻击伤害</dt><dd>${Math.round(weaponDamage(p))}</dd></div>
-      <div><dt>攻速</dt><dd>${(1/p.rate).toFixed(2)}<small> 次/秒</small></dd></div>
-      <div><dt>范围</dt><dd>${Math.round(p.range)}</dd></div>
-    </dl>
+  const gear=run.gear.filter(Boolean).map(slot=>ARMORY[slot.key].name+' '+slot.tier+' 阶').join(' · ');
+  openDialog('pause','战斗暂停',`<p>第 ${run.wave} / 20 波 · ${run.points} 补给点</p>
+    <p>${gear}</p>
     ${run.upgrades.length?`<p class="upgrade-history">本局道具 · ${[...new Set(run.upgrades)].map(name=>`${name} ×${run.upgrades.filter(item=>item===name).length}`).join('、')}</p>`:''}
     <p>${checkpointHint}</p>
     <div class="dialog-actions"><button class="primary" data-resume>继续战斗</button><button class="dark-button" data-home>返回大厅</button></div>`,false);
@@ -971,7 +1203,7 @@ const hud={
   xp:$('.experience'),xpFill:$('#xp-fill'),xpText:$('#xp-text'),wave:$('#wave'),detail:$('#wave-detail'),
   boss:$('#boss-meter'),bossBar:$('#boss-meter .meter'),bossName:$('#boss-name'),bossFill:$('#boss-fill'),bossMove:$('#boss-move'),
   banner:$('#wave-banner'),skill:$('#skill'),ultimate:$('#ultimate'),
-  time:$('#wave-time'),timeFill:$('#time-fill'),gifts:$('#gift-count'),
+  time:$('#wave-time'),timeFill:$('#time-fill'),points:$('#point-count'),
 };
 const writeText=(node,value)=>{if(node.textContent!==value)node.textContent=value};
 function setMeter(node,fill,value,max) {
@@ -1010,7 +1242,7 @@ function updateHud() {
   writeText(hud.time,Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0'));
   hud.time.classList.toggle('urgent',seconds<=10&&!cleared);
   hud.timeFill.style.width=100*run.waveTime/WAVE_SECONDS+'%';
-  writeText(hud.gifts,String(run.gifts));
+  writeText(hud.points,String(run.points));
   const detail=run.phase==='clear'?'拾取附近掉落物':run.phase==='prep'?'备战中':run.phase==='finished'?'战斗结算':
     intro?(run.hasBoss?'首领即将登场':'敌人接近中'):seconds===0?'加时 · 击败首领':'击倒 '+run.kills;
   writeText(hud.detail,detail);
@@ -1091,6 +1323,12 @@ function drawEffect(f) {
     shape(ctx,points,null,'#ff82d0',10);
     shape(ctx,points,null,'#fff5e8',3.1);
     oval(ctx,f.x,f.y,14+progress*17,7+progress*9,null,'#f7aef7',2.8);
+  }else if(f.kind==='lance'||f.kind==='beam'){
+    ctx.translate(f.x,f.y);ctx.rotate(f.angle);
+    const beam=f.kind==='beam',width=(beam?13:8)*(1-progress)+2;
+    shape(ctx,[[0,0],[f.r,0]],null,f.color,width);
+    shape(ctx,[[beam?0:f.r*.24,0],[f.r,0]],null,'#fff5dd',width*.31);
+    if(!beam)shape(ctx,[[f.r*.70,-5],[f.r,0],[f.r*.70,5]],null,f.color,2);
   }else if(f.kind==='shockwave'||f.kind==='storm'){
     const radius=f.r*Math.min(1,.28+progress*1.75);
     const glow=ctx.createRadialGradient(f.x,f.y,0,f.x,f.y,radius);
@@ -1158,20 +1396,55 @@ function drawShot(shot) {
   const trail=ctx.createLinearGradient(-tail,0,shot.r,0);
   trail.addColorStop(0,shot.color+'00');trail.addColorStop(1,shot.color+'bb');
   shape(ctx,[[-tail,0],[0,-shot.r*.78],[shot.r,0],[0,shot.r*.78]],trail);
-  if(shot.kind==='音波'){
+  if(shot.kind==='note'){
     for(const offset of [-13,-5,3]){
       ctx.beginPath();ctx.arc(offset,0,9+offset*.16,-1.05,1.05);
       ctx.strokeStyle=offset===3?'#f8e5ff':shot.color;ctx.lineWidth=offset===3?2.8:1.9;ctx.stroke();
     }
-  }else if(shot.kind==='投掷'){
+  }else if(shot.kind==='rock'){
     ctx.rotate(shot.range*12);
     shape(ctx,[[-7,-4],[2,-7],[8,-1],[4,7],[-7,5]],shot.color,OUTLINE,1.5);
     shape(ctx,[[-5,-3],[1,-5],[4,-2]],null,'#ffeecc',1.5);
+  }else if(shot.kind==='dart'){
+    shape(ctx,[[-10,0],[0,-4],[11,0],[0,4]],shot.color,OUTLINE,1.4);
+    shape(ctx,[[0,0],[9,0]],null,'#fff9dd',1.5);
   }else{
     oval(ctx,0,0,shot.r,shot.r,shot.hostile?'#e485acbb':'#70e7e766',shot.color,1.7);
     oval(ctx,-2,-2,shot.r*.27,shot.r*.24,'#fff9dc');
   }
   ctx.restore();
+}
+
+function drawEquippedWeapons(behind) {
+  run.gear.forEach((slot,index)=>{
+    if(!slot)return;
+    const weapon=ARMORY[slot.key],mount=weaponMount(index);
+    const ranged=index>=2,back=ranged&&mount.y<run.player.y-12;
+    if(back!==behind)return;
+    const flash=slot.flash/.25;
+    ctx.save();ctx.translate(mount.x,mount.y);
+    if(back)ctx.globalAlpha=.79;
+    if(ranged){
+      oval(ctx,0,0,13,12,'#11374394',weapon.color+'a8',1.6+flash);
+      ctx.fillStyle='#f7ffed';ctx.font='bold 15px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(weapon.glyph,0,0);
+      if(flash>0){
+        const dx=Math.cos(slot.aim),dy=Math.sin(slot.aim);
+        oval(ctx,dx*13,dy*12,4+flash*3,4+flash*3,weapon.color);
+      }
+    }else{
+      const rest=index===0?3.74:-.55;
+      const tilt=flash>0?slot.aim+flash*.36:rest;
+      ctx.rotate(tilt);
+      shape(ctx,[[-5,0],[10,0]],null,OUTLINE,6);
+      shape(ctx,[[-5,0],[9,0]],null,'#d0aa86',3);
+      if(slot.key==='spatula')box(ctx,8,-5,12,10,1,weapon.color,OUTLINE,1.7);
+      else if(slot.key==='net')oval(ctx,15,0,8,5,'#69d4bc66',weapon.color,2);
+      else if(weapon.style==='thrust')shape(ctx,[[7,-4],[25,0],[7,4]],weapon.color,OUTLINE,1.7);
+      else shape(ctx,[[7,-4],[17,-7],[24,-3],[22,5],[12,7],[7,3]],weapon.color,OUTLINE,1.8);
+    }
+    ctx.restore();
+  });
 }
 
 function drawOffscreenThreats() {
@@ -1238,13 +1511,13 @@ function draw() {
   for(const drop of run.drops){
     if(!inView(drop,12))continue;
     const bob=Math.sin(run.time*5+drop.x)*2;
-    if(drop.kind==='gift'){
+    if(drop.kind==='point'){
       const x=drop.x,y=drop.y+bob;
-      const r=drop.value>1?14:10;
-      oval(ctx,x,y+8,r+3,5,'#1518287f');
-      box(ctx,x-r,y-7,r*2,16,3,drop.value>1?'#e68ad7':'#e5ad67','#221637',1.7);
-      box(ctx,x-r-1,y-9,r*2+2,6,2,'#ffcc7c','#221637',1);
-      shape(ctx,[[x,y+8],[x,y-10],[x-5,y-14],[x-8,y-10],[x,y-10],[x+6,y-14],[x+8,y-10],[x,y-10]],null,'#fff2be',2);
+      const r=drop.value>=10?12:drop.value>=3?8:5.6;
+      const color=drop.value>=10?'#ffb3e9':drop.value>=3?'#ffd47c':'#84ffdb';
+      oval(ctx,x,y+r*.45,r,3,'#072b3574');
+      shape(ctx,[[x,y-r],[x+r*.8,y],[x,y+r],[x-r*.8,y]],color,OUTLINE,1.3);
+      shape(ctx,[[x,y-r],[x+r*.8,y],[x,y+1],[x-r*.8,y]],'#ffffff72');
     }else{
       oval(ctx,drop.x,drop.y+bob,8,6,'#fddb79','#543d33',1.5);
       box(ctx,drop.x-8,drop.y-1+bob,16,3,1,'#98684c');
@@ -1262,11 +1535,13 @@ function draw() {
   }
   for(const shot of run.shots)if(inView(shot,42))drawShot(shot);
   oval(ctx,p.x,p.y+15,22-p.stride*2,8,'#07283795',run.hero.color+'8f',1.65);
+  drawEquippedWeapons(true);
   ctx.save();
   if(run.hurtGlow>0)ctx.globalAlpha=.75+run.hurtGlow*.5;
   drawHero(ctx,run.hero.id,p.x,p.y-7,.91,{time:run.time,steps:p.steps,face:p.face,
-    stride:p.stride,tilt:p.tilt,kick:p.kick,cast:p.cast,aim:p.aim});
+    stride:p.stride,tilt:p.tilt,kick:p.kick,cast:p.cast,aim:p.aim,showWeapon:false});
   ctx.restore();
+  drawEquippedWeapons(false);
   for(const effect of run.fx){if(effect.kind!=='wake'&&inView(effect,effect.r||35))drawEffect(effect)}
   drawOffscreenThreats();
   if(run.hurtGlow>0){
@@ -1453,7 +1728,7 @@ if('serviceWorker' in navigator&&location.protocol!=='file:'){
     const timer=setTimeout(()=>channel.port1.close(),5000);
     channel.port1.onmessage=({data})=>{
       clearTimeout(timer);channel.port1.close();
-      if(data?.type!=='offline-status'||data.version!==5||controller!==navigator.serviceWorker.controller)return;
+      if(data?.type!=='offline-status'||data.version!==6||controller!==navigator.serviceWorker.controller)return;
       offlineReady=data.ready===true;
       const status=$('#offline-status');
       if(status)status.textContent=offlineReady?'离线资源已就绪。当前设备会保留战绩、解锁和每波存档。':'离线资源还在准备，请保持联网并刷新游戏。';

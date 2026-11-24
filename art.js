@@ -54,7 +54,7 @@ function arcLine(ctx,x,y,rx,ry,start,end,color,width=1.4) {
 }
 
 function drawHero(ctx,id,x,y,scale=1,pose={}) {
-  const {time=0,steps=0,face=1,stride=0,tilt=0,kick=0,cast=0,aim=0,splash=false}=pose;
+  const {time=0,steps=0,face=1,stride=0,tilt=0,kick=0,cast=0,aim=0,splash=false,showWeapon=true}=pose;
   const swing=Math.sin(steps);
   const step=swing*stride*(id==='patrick'?5:7);
   const lift=Math.abs(swing)*stride*(id==='gary'?1.1:3.4);
@@ -94,7 +94,7 @@ function drawHero(ctx,id,x,y,scale=1,pose={}) {
     oval(ctx,-10,-.3,2.7,1.6,'#f79f5870');oval(ctx,12,-.7,2.8,1.6,'#f79f5888');
     smile(ctx,1,-1,10);oval(ctx,3,-4,4,2.6,'#fadd66',OUTLINE,1);
     box(ctx,-3,0,4,3,1,'#fffbea');box(ctx,2,0,4,3,1,'#fffbea');
-    if(action)drawSpatula(ctx,29,handY,-.46+recoil*1.8+Math.sin(aim)*.24);
+    if(action&&showWeapon)drawSpatula(ctx,29,handY,-.46+recoil*1.8+Math.sin(aim)*.24);
   }else if(id==='patrick'){
     const arm=action?-13+recoil*14:4+step-raise*10;
     shape(ctx,[[0,-28],[8,-15],[13,-3],[30,arm],[25,8+arm*.23],[14,7],[16-step,25],[5,23],[0,16],[-5,24],[-16+step,25],[-14,7],[-28,13-step],[-30,7-step],[-13,-4],[-8,-19]],surface(ctx,-28,25,'#ffc4cf','#e86f99'),OUTLINE,2.3);
@@ -107,7 +107,7 @@ function drawHero(ctx,id,x,y,scale=1,pose={}) {
       shape(ctx,[[28,-11],[40,-37]],null,OUTLINE,4);
       oval(ctx,43,-42,12,8,null,'#f5b9a0',2.2);
       shape(ctx,[[32,-42],[42,-26],[54,-42],[46,-32],[39,-34],[34,-43]],null,'#b5e9d8',1);
-    }else if(action&&kick>.21){
+    }else if(action&&showWeapon&&kick>.21){
       shape(ctx,[[24,arm-7],[32,arm-10],[36,arm-4],[32,arm+3],[24,arm+1]],'#cbacc0',OUTLINE,1.5);
     }
   }else if(id==='squid'){
@@ -123,7 +123,7 @@ function drawHero(ctx,id,x,y,scale=1,pose={}) {
     for(const n of [-11,-7,-4])oval(ctx,n,-18-(n+11)*.2,1.4,1,'#689f99');
     gaze(-5,-5,5,7,'#b6596c');gaze(6,-5,5,7,'#b6596c');
     oval(ctx,3,2,4,8,'#77b6a7',OUTLINE,1.6);shape(ctx,[[-8,8],[-3,6],[8,6]],null,OUTLINE,1.4);
-    if(action){
+    if(action&&showWeapon){
       shape(ctx,[[9,4],[29,8-recoil*6]],null,'#14273f',5);
       oval(ctx,29,8-recoil*6,3.4,2.3,'#b3a0df',OUTLINE,1.2);
       oval(ctx,19,6-recoil*3,1.6,1.6,'#f6d8a4');
@@ -138,7 +138,7 @@ function drawHero(ctx,id,x,y,scale=1,pose={}) {
     arcLine(ctx,0,-9,17,17,3.25,4.45,'#dcfffb',1.9);
     oval(ctx,-12,-20,2.3,4.2,'#ebfff7');oval(ctx,11,-23,5,5,'#f679b3',OUTLINE,1);oval(ctx,11,-23,2,2,'#ffe25f');
     box(ctx,-4,13,9,4,1,'#84b6bd',OUTLINE,.8);
-    if(action){
+    if(action&&showWeapon){
       const netY=-25+recoil*24;
       shape(ctx,[[18,10],[36,netY]],null,'#c59b67',3.6);
       oval(ctx,37,netY-3,9,6,null,'#e2ffed',1.7);
@@ -166,7 +166,7 @@ function drawHero(ctx,id,x,y,scale=1,pose={}) {
     const sway=step*.43+raise*3;
     shape(ctx,[[15,13],[16+sway,-13],[23+sway,-15],[22,14]],surface(ctx,-15,14,'#c8f8f0','#66a9cb'),OUTLINE,1.5);
     gaze(15+sway,-14,4.3,5,'#d58a39');gaze(23+sway,-15,4.3,5,'#d58a39');
-    if(action)oval(ctx,25,8,4+recoil*4,4+recoil*4,'#b4f7f75a','#e2fff5',1.5);
+    if(action&&showWeapon)oval(ctx,25,8,4+recoil*4,4+recoil*4,'#b4f7f75a','#e2fff5',1.5);
   }
   ctx.restore();
 }

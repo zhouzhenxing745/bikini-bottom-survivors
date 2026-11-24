@@ -19,21 +19,10 @@ const DIFFICULTIES = [
   { name:'深渊 · 困难', hp:1.18, damage:1.34, speed:1.12, xp:.91, bossHp:1.2, count:4, crowd:18, windup:.89, recovery:.85, heal:0, burger:15 },
 ];
 
-const WEAPONS = {
-  spatula:{ name:'金锅铲', kind:'挥砍', damage:23, range:174, rate:.67, knock:78, color:'#ffe579', glyph:'✦' },
-  rock:{ name:'派大星的石头', kind:'投掷', damage:30, range:230, rate:.83, knock:114, color:'#e2ae9b', glyph:'◆' },
-  clarinet:{ name:'单簧管', kind:'音波', damage:18, range:280, rate:.49, knock:46, color:'#b9a0fc', glyph:'♫' },
-  net:{ name:'水母网', kind:'挥砍', damage:25, range:170, rate:.63, knock:69, color:'#75ffe5', glyph:'◎' },
-  claw:{ name:'蟹老板的钳子', kind:'挥砍', damage:31, range:161, rate:.76, knock:90, color:'#ff9d76', glyph:'✸' },
-  bubble:{ name:'泡泡棒', kind:'气泡', damage:21, range:253, rate:.59, knock:48, color:'#88e8ff', glyph:'◉' },
-};
-
 const UPGRADE_LIMITS={ attackInterval:.26, speed:375, magnet:280, range:380, skillCooldown:.38, crit:.75 };
 
-const WEAPON_TIERS=[
-  {cost:5,damage:1.12,rate:.95,range:1.05},
-  {cost:8,damage:1.25,rate:.89,range:1.10},
-  {cost:11,damage:1.39,rate:.84,range:1.15},
+const PREVIOUS_WEAPON_TIERS=[
+  {rate:.95,range:1.05},{rate:.89,range:1.10},{rate:.84,range:1.15},
 ];
 
 const PREP_ITEMS=[
@@ -86,11 +75,7 @@ const UPGRADES = [
   {
     name:'捕水母手套', label:'攻击间隔最多 −13%',
     available:p=>p.rate>UPGRADE_LIMITS.attackInterval,
-    apply:p=>{
-      const interval=Math.max(UPGRADE_LIMITS.attackInterval,p.rate*.87);
-      if(p.attack>0)p.attack*=interval/p.rate;
-      p.rate=interval;
-    },
+    apply:p=>{p.rate=Math.max(UPGRADE_LIMITS.attackInterval,p.rate*.87)},
   },
   { name:'蟹黄堡', label:'生命上限 +22，回复 30 生命', apply:p=>{p.maxHp+=22;p.hp=Math.min(p.maxHp,p.hp+30)} },
   {

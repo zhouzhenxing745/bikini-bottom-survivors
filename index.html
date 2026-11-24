@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="./icon-192.png">
   <link rel="icon" href="./icon-192.png">
   <link rel="manifest" href="./app.webmanifest">
-  <link rel="stylesheet" href="./style.css?v=5">
+  <link rel="stylesheet" href="./style.css?v=6">
   <title>海绵宝宝：比奇堡大乱斗</title>
 </head>
 <body>
@@ -34,7 +34,7 @@
         <div class="hero-copy">
           <div class="kicker"><span></span> 海绵宝宝同人动作肉鸽</div>
           <h1 id="title"><span>比奇堡</span><br>大乱斗<span class="bang">!</span></h1>
-          <p>每波坚守 60 秒。捡起礼包，<br>在下一波来临前强化你的装备。</p>
+          <p>每波坚守 60 秒。拾取补给点，<br>在下一波来临前组装四武器阵容。</p>
           <button class="dark-button" data-open="guide"><span>▤</span> 玩法图鉴</button>
         </div>
       </section>
@@ -89,7 +89,7 @@
           <button class="icon-button" id="pause" aria-label="暂停" title="暂停">Ⅱ</button>
         </div>
       </div>
-      <span class="gift-counter"><span aria-hidden="true">▦</span> 礼包 <b id="gift-count">0</b></span>
+      <span class="gift-counter"><span aria-hidden="true">◆</span> 补给点 <b id="point-count">0</b></span>
       <div id="boss-meter" hidden>
         <strong id="boss-name"></strong>
         <div class="meter" role="meter" aria-label="首领生命" aria-valuemin="0"><i id="boss-fill"></i></div>
@@ -108,9 +108,11 @@
   </main>
   <dialog id="modal" aria-labelledby="modal-title"><div id="modal-content"></div></dialog>
   <div id="toast" role="status" hidden></div>
-  <script src="./data.js?v=5" defer></script>
-  <script src="./art.js?v=5" defer></script>
-  <script src="./audio.js?v=5" defer></script>
-  <script src="./game.js?v=5" defer></script>
+  <script src="./data.js?v=6" defer></script>
+  <script src="./catalog.js?v=6" defer></script>
+  <script src="./art.js?v=6" defer></script>
+  <script src="./audio.js?v=6" defer></script>
+  <script src="./prep.js?v=6" defer></script>
+  <script src="./game.js?v=6" defer></script>
 </body>
 </html>
