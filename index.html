@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="./icon-192.png">
   <link rel="icon" href="./icon-192.png">
   <link rel="manifest" href="./app.webmanifest">
-  <link rel="stylesheet" href="./style.css?v=4">
+  <link rel="stylesheet" href="./style.css?v=5">
   <title>海绵宝宝：比奇堡大乱斗</title>
 </head>
 <body>
@@ -98,19 +98,19 @@
     </div>
     <div class="wave-banner" id="wave-banner" aria-hidden="true"></div>
     <div class="controls">
-      <div id="joystick" aria-label="移动摇杆"><span id="stick"></span></div>
+      <div id="joystick" role="group" aria-label="移动摇杆"><span id="stick" aria-hidden="true"></span></div>
       <span class="desktop-hint">WASD / 方向键移动 · 自动攻击</span>
       <div class="skills">
-        <button id="skill" class="skill"><span class="skill-symbol">◉</span><strong>泡泡旋刃</strong><small></small></button>
-        <button id="ultimate" class="skill ultimate"><span class="skill-symbol">✷</span><strong>水母风暴</strong><small></small></button>
+        <button type="button" id="skill" class="skill" aria-keyshortcuts="Space"><span class="skill-symbol" aria-hidden="true">◉</span><strong>泡泡旋刃</strong><small></small></button>
+        <button type="button" id="ultimate" class="skill ultimate" aria-keyshortcuts="Q"><span class="skill-symbol" aria-hidden="true">✷</span><strong>水母风暴</strong><small></small></button>
       </div>
     </div>
   </main>
   <dialog id="modal" aria-labelledby="modal-title"><div id="modal-content"></div></dialog>
   <div id="toast" role="status" hidden></div>
-  <script src="./data.js?v=4" defer></script>
-  <script src="./art.js?v=4" defer></script>
-  <script src="./audio.js?v=4" defer></script>
-  <script src="./game.js?v=4" defer></script>
+  <script src="./data.js?v=5" defer></script>
+  <script src="./art.js?v=5" defer></script>
+  <script src="./audio.js?v=5" defer></script>
+  <script src="./game.js?v=5" defer></script>
 </body>
 </html>

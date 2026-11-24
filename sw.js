@@ -1,4 +1,4 @@
-const VERSION=4;
+const VERSION=5;
 const CACHE_PREFIX='bikini-bottom-v';
 const CACHE=CACHE_PREFIX+VERSION;
 const PREVIOUS_CACHE=CACHE_PREFIX+(VERSION-1);

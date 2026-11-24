@@ -53,6 +53,8 @@ const viewport={w:0,h:0,dpi:1,scale:1};
 const camera={x:0,y:0};
 const keys=new Set();
 const joystick={id:null,x:0,y:0};
+const skillQueue=[0,0];
+const SKILL_BUFFER=.18;
 let selectedHero=profile.unlocked?savedIndex(storedProfile?.hero,HEROES.length):0;
 let selectedMap=savedIndex(storedProfile?.map,MAPS.length);
 let selectedDifficulty=savedIndex(storedProfile?.difficulty,DIFFICULTIES.length);
@@ -216,6 +218,17 @@ function resizeField() {
   viewport.w=width;viewport.h=height;viewport.dpi=Math.min(devicePixelRatio||1,2);
   viewport.scale=clamp(Math.max(height/world.h,Math.min(width/480,height/410)),.71,1.32);
   field.width=Math.round(width*viewport.dpi);field.height=Math.round(height*viewport.dpi);
+  const padBounds=pad.getBoundingClientRect();
+  const smallBounds=hud.skill.getBoundingClientRect();
+  const ultimateBounds=hud.ultimate.getBoundingClientRect();
+  const controlsTop=Math.min(padBounds.top,smallBounds.top,ultimateBounds.top);
+  const waveHudBottom=hud.wave.parentElement?.getBoundingClientRect().bottom;
+  viewport.warningEdges={
+    left:Math.max(21,(padBounds.left||0)+9),
+    right:Math.min(width-21,(ultimateBounds.right||width)-9),
+    top:Number.isFinite(waveHudBottom)?waveHudBottom+15:88,
+    bottom:Number.isFinite(controlsTop)?Math.max(height*.57,controlsTop-16):height-118,
+  };
 }
 
 function createGround(map) {
@@ -632,9 +645,13 @@ function updateDrops(dt) {
 }
 
 function useSkill(ultimate) {
-  if(!run||modal.open||run.phase!=='combat')return;
+  if(!run||modal.open||run.phase!=='combat')return false;
   const p=run.player;
-  if(ultimate ? p.ultimate>0||p.charge<100 : p.skill>0)return;
+  if(ultimate ? p.ultimate>0||p.charge<100 : p.skill>0)return false;
+  const slot=Number(ultimate);
+  skillQueue[slot]=0;
+  run.castUntil??=[0,0];
+  run.castUntil[slot]=run.time+.28;
   if(ultimate){
     p.ultimate=p.ultimateMax=16*p.cooldown;p.charge=0;
     run.storm={left:3.2,pulse:0};
@@ -654,6 +671,25 @@ function useSkill(ultimate) {
   run.shake=ultimate?.32:.16;
   audio.effect(ultimate?'ultimate':'skill');
   updateHud();
+  return true;
+}
+
+function requestSkill(ultimate) {
+  if(useSkill(ultimate)||!run||modal.open||run.phase!=='combat')return;
+  const p=run.player;
+  const remaining=ultimate?p.ultimate:p.skill;
+  if(remaining>SKILL_BUFFER||remaining<=0||(ultimate&&p.charge<100))return;
+  skillQueue[Number(ultimate)]=run.time+SKILL_BUFFER+.06;
+  updateHud();
+}
+
+function releaseQueuedSkills() {
+  for(let i=0;i<skillQueue.length;i++){
+    const deadline=skillQueue[i];
+    if(!deadline)continue;
+    if(run.time>deadline)skillQueue[i]=0;
+    else useSkill(Boolean(i));
+  }
 }
 
 function tickStorm(dt) {
@@ -736,6 +772,7 @@ function update(dt) {
   }
   if(run.phase==='combat'){
     run.waveTime=Math.max(0,run.waveTime-dt);
+    releaseQueuedSkills();
     spawnDuringWave(dt);
     if(p.attack<=0)attack();
     tickStorm(dt);updateEnemies(dt);updateShots(dt);updateHazards(dt);updateDrops(dt);
@@ -751,6 +788,7 @@ function update(dt) {
 
 function clearWave() {
   run.phase='clear';run.clock=2.55;
+  skillQueue.fill(0);
   run.enemies.length=0;run.shots.length=0;run.hazards.length=0;run.storm=null;
   profile.best=Math.max(profile.best,run.wave);
   profile.records[run.difficultyIndex]=Math.max(profile.records[run.difficultyIndex],run.wave);
@@ -945,11 +983,17 @@ function setMeter(node,fill,value,max) {
   if(node.getAttribute('aria-valuemax')!==String(max))node.setAttribute('aria-valuemax',String(max));
 }
 
-function updateSkillButton(button,disabled,value,progress) {
-  button.disabled=disabled;
-  button.style.setProperty('--ready-progress',Math.round(clamp(progress,0,1)*100)+'%');
+function updateSkillButton(button,disabled,value,progress,slot) {
+  const state=String(disabled);
+  if(button.getAttribute('aria-disabled')!==state)button.setAttribute('aria-disabled',state);
+  const ringProgress=Math.round(clamp(progress,0,1)*100)+'%';
+  if(button.style.getPropertyValue('--ready-progress')!==ringProgress)button.style.setProperty('--ready-progress',ringProgress);
+  button.classList.toggle('is-firing',run.castUntil?.[slot]>run.time);
+  button.classList.toggle('is-queued',skillQueue[slot]>run.time);
   writeText(button.querySelector('small'),value);
 }
+
+const cooldownText=seconds=>seconds<1?Math.max(.1,Math.ceil(seconds*10)/10).toFixed(1)+' 秒':Math.ceil(seconds)+' 秒';
 
 function updateHud() {
   if(!run)return;
@@ -989,10 +1033,11 @@ function updateHud() {
   }
   writeText(hud.banner,intro?(run.hasBoss?BOSSES[run.wave/5-1].name+'来袭':'第 '+run.wave+' 波'):run.phase==='clear'?'清场 · 拾取补给':'');
   const combat=run.phase==='combat';
-  updateSkillButton(hud.skill,p.skill>0||!combat,p.skill>0?Math.ceil(p.skill)+' 秒':touchInput.matches?'可释放':'空格',
-    1-Math.max(0,p.skill)/(p.skillMax||1));
-  updateSkillButton(hud.ultimate,p.ultimate>0||p.charge<100||!combat,p.ultimate>0?Math.ceil(p.ultimate)+' 秒':p.charge<100?p.charge+'%':touchInput.matches?'已充能':'已充能 · Q',
-    p.ultimate>0?1-p.ultimate/(p.ultimateMax||1):p.charge/100);
+  const skillText=skillQueue[0]>run.time?'即将释放':p.skill>0?cooldownText(p.skill):!combat?'待开战':touchInput.matches?'可释放':'空格';
+  const ultimateText=skillQueue[1]>run.time?'即将释放':p.ultimate>0?cooldownText(p.ultimate):p.charge<100?p.charge+'%':!combat?'待开战':touchInput.matches?'已充能':'已充能 · Q';
+  updateSkillButton(hud.skill,p.skill>0||!combat,skillText,1-Math.max(0,p.skill)/(p.skillMax||1),0);
+  updateSkillButton(hud.ultimate,p.ultimate>0||p.charge<100||!combat,ultimateText,
+    p.ultimate>0?1-p.ultimate/(p.ultimateMax||1):p.charge/100,1);
 }
 
 function drawEffect(f) {
@@ -1130,20 +1175,21 @@ function drawShot(shot) {
 }
 
 function drawOffscreenThreats() {
-  const {w,h,dpi,scale}=viewport;
+  const {w,h,dpi,scale,warningEdges}=viewport;
   const p=run.player;
   const near=run.enemies.filter(e=>e.boss||e.entered<.9);
   if(!near.length)return;
   ctx.setTransform(dpi,0,0,dpi,0,0);
-  const position={x:clamp((p.x-camera.x)*scale,30,w-30),y:clamp((p.y-camera.y)*scale,92,h-112)};
+  const {left,right,top,bottom}=warningEdges;
+  const position={x:clamp((p.x-camera.x)*scale,left+1,right-1),y:clamp((p.y-camera.y)*scale,top+1,bottom-1)};
   const used=new Set();
   for(const e of near.sort((a,b)=>Number(b.boss)-Number(a.boss))){
     const x=(e.x-camera.x)*scale,y=(e.y-camera.y)*scale,s=e.size*scale;
     if(x>-s&&x<w+s&&y>-s&&y<h+s)continue;
     const dx=x-position.x,dy=y-position.y;
     const edge=Math.min(
-      dx>0?(w-21-position.x)/dx:dx<0?(21-position.x)/dx:Infinity,
-      dy>0?(h-103-position.y)/dy:dy<0?(75-position.y)/dy:Infinity,
+      dx>0?(right-position.x)/dx:dx<0?(left-position.x)/dx:Infinity,
+      dy>0?(bottom-position.y)/dy:dy<0?(top-position.y)/dy:Infinity,
     );
     const px=position.x+dx*edge,py=position.y+dy*edge;
     const sector=Math.round((Math.atan2(dy,dx)+Math.PI)*4/Math.PI)%8;
@@ -1249,33 +1295,65 @@ function loop(now) {
 
 function resetInput() {
   keys.clear();
-  if(joystick.id!==null && $('#joystick').hasPointerCapture(joystick.id))$('#joystick').releasePointerCapture(joystick.id);
-  joystick.id=null;joystick.x=0;joystick.y=0;
-  $('#stick').style.transform='translate(-50%,-50%)';
+  skillQueue.fill(0);
+  releaseStick();
+  hud.skill.classList.remove('is-pressed');hud.ultimate.classList.remove('is-pressed');
+}
+
+function releaseStick() {
+  const active=joystick.id;
+  joystick.id=null;joystick.x=0;joystick.y=0;joystick.bounds=null;
+  if(active!==null&&pad.hasPointerCapture(active))pad.releasePointerCapture(active);
+  pad.classList.remove('is-active');
+  stick.style.transform='';
 }
 
 function moveStick(e) {
-  const rect=joystick.bounds,max=rect.width*.33;
-  const x=e.clientX-rect.left-rect.width/2,y=e.clientY-rect.top-rect.height/2,len=Math.hypot(x,y);
-  const deadzone=rect.width*.062;
+  const rect=joystick.bounds,max=rect.width*.345;
+  const x=e.clientX-rect.left-rect.width/2,y=e.clientY-rect.top-rect.height/2;
+  const len=Math.hypot(x,y),deadzone=rect.width*.047;
   const strength=clamp((len-deadzone)/(max-deadzone),0,1);
   joystick.x=x/(len||1)*strength;joystick.y=y/(len||1)*strength;
-  $('#stick').style.transform=`translate(calc(-50% + ${joystick.x*max}px),calc(-50% + ${joystick.y*max}px))`;
+  stick.style.transform=`translate(calc(-50% + ${joystick.x*max}px),calc(-50% + ${joystick.y*max}px))`;
 }
 
-const pad=$('#joystick');
+const pad=$('#joystick'),stick=$('#stick');
 pad.addEventListener('pointerdown',e=>{
   if(joystick.id!==null||!run||modal.open||e.button!==0)return;
   e.preventDefault();joystick.id=e.pointerId;joystick.bounds=pad.getBoundingClientRect();
-  pad.setPointerCapture(e.pointerId);moveStick(e);
+  pad.setPointerCapture(e.pointerId);pad.classList.add('is-active');moveStick(e);
 });
 pad.addEventListener('pointermove',e=>{if(e.pointerId===joystick.id)moveStick(e)});
 for(const event of ['pointerup','pointercancel','lostpointercapture']){
   pad.addEventListener(event,e=>{
-    if(e.pointerId!==joystick.id)return;
-    joystick.id=null;joystick.x=0;joystick.y=0;$('#stick').style.transform='translate(-50%,-50%)';
+    if(e.pointerId===joystick.id)releaseStick();
   });
 }
+
+for(const [button,ultimate] of [[hud.skill,false],[hud.ultimate,true]]){
+  let touched=false;
+  button.addEventListener('pointerdown',e=>{
+    if(e.button!==0||!run||modal.open)return;
+    touched=e.pointerType==='touch'||e.pointerType==='pen';
+    button.classList.add('is-pressed');
+    if(touched){
+      e.preventDefault();
+      requestSkill(ultimate);
+    }
+  });
+  for(const event of ['pointerup','pointercancel','pointerleave','lostpointercapture']){
+    button.addEventListener(event,()=>{
+      button.classList.remove('is-pressed');
+      if(event==='pointercancel')skillQueue[Number(ultimate)]=0;
+    });
+  }
+  button.addEventListener('click',e=>{
+    if(touched&&e.detail>0){touched=false;return}
+    requestSkill(ultimate);
+  });
+  button.addEventListener('contextmenu',e=>e.preventDefault());
+}
+pad.addEventListener('contextmenu',e=>e.preventDefault());
 
 document.addEventListener('keydown',e=>{
   if(!run || e.ctrlKey || e.metaKey || e.altKey)return;
@@ -1285,11 +1363,13 @@ document.addEventListener('keydown',e=>{
     return;
   }
   if(modal.open)return;
+  const focused=document.activeElement;
+  if(key===' '&&focused?.tagName==='BUTTON'&&focused!==hud.skill&&focused!==hud.ultimate)return;
   if(['a','d','s','w','arrowup','arrowdown','arrowleft','arrowright',' ','q'].includes(key)){
     e.preventDefault();
-    if(!e.repeat&&key===' ')useSkill(false);
-    else if(!e.repeat&&key==='q')useSkill(true);
-    else keys.add(key);
+    if(key===' '||key==='q'){
+      if(!e.repeat)requestSkill(key==='q'||focused===hud.ultimate);
+    }else keys.add(key);
   }
 });
 document.addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
@@ -1360,8 +1440,6 @@ document.addEventListener('click',async e=>{
       <div class="dialog-actions"><button class="dark-button" data-close>取消</button><button class="primary" data-new-run>开始新局</button></div>`);
   }
   if(button.id==='pause')pause();
-  if(button.id==='skill')useSkill(false);
-  if(button.id==='ultimate')useSkill(true);
   if(button.hasAttribute('data-resume'))resume();
   if(button.hasAttribute('data-home'))home();
 });
@@ -1375,7 +1453,7 @@ if('serviceWorker' in navigator&&location.protocol!=='file:'){
     const timer=setTimeout(()=>channel.port1.close(),5000);
     channel.port1.onmessage=({data})=>{
       clearTimeout(timer);channel.port1.close();
-      if(data?.type!=='offline-status'||data.version!==4||controller!==navigator.serviceWorker.controller)return;
+      if(data?.type!=='offline-status'||data.version!==5||controller!==navigator.serviceWorker.controller)return;
       offlineReady=data.ready===true;
       const status=$('#offline-status');
       if(status)status.textContent=offlineReady?'离线资源已就绪。当前设备会保留战绩、解锁和每波存档。':'离线资源还在准备，请保持联网并刷新游戏。';
