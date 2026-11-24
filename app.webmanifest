@@ -1,0 +1,17 @@
+{
+  "id": "./",
+  "name": "海绵宝宝：比奇堡大乱斗",
+  "short_name": "比奇堡大乱斗",
+  "description": "在比奇堡迎战 20 波敌人，强化角色、解锁伙伴，离线也能继续挑战。",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#07131e",
+  "theme_color": "#07131e",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    {"src":"./icon-192.png","sizes":"192x192","type":"image/png","purpose":"any"},
+    {"src":"./icon-512.png","sizes":"512x512","type":"image/png","purpose":"any"}
+  ]
+}
